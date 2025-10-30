@@ -2,10 +2,6 @@ from typing import Dict, List
 from dataclasses import dataclass, field
 
 from lerobot.configs.policies import PreTrainedConfig
-
-# LeRobot Imports (müssen angepasst werden)
-# from lerobot.common.policies.normalize import Normalize, Unnormalize
-# from lerobot.common.policies.policy_protocol import PolicyProtocol, PolicyConfig
 from lerobot.optim.optimizers import AdamWConfig
 
 from lerobot.optim.schedulers import (
