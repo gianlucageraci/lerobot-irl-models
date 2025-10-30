@@ -1,6 +1,7 @@
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.configs.policies import PreTrainedConfig
 
+
 @PreTrainedConfig.register_subclass("beso")
 class BesoConfig(DiffusionConfig):
     def __init__(
@@ -15,7 +16,7 @@ class BesoConfig(DiffusionConfig):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.embed_dim=448
+        self.embed_dim = 448
         # EDM-like scaling hyperparams
         self.sigma_data = sigma_data
         self.sigma_max = sigma_max
