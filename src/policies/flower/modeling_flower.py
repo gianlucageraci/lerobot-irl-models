@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Tuple, List, Any
-
+import einops
 import torch
 import torch.nn as nn
 from transformers import AutoProcessor, AutoModelForCausalLM
@@ -18,6 +18,7 @@ from .transformes import (
     FlowBlock,
     stateless_norm,
 )
+from torchdiffeq import odeint
 
 logger = logging.getLogger(__name__)
 
@@ -42,29 +43,20 @@ class FlowerVLAPolicy(PreTrainedPolicy):
     def __init__(
         self,
         config: FlowerVLAConfig,
-        # dataset_stats: Optional[Dict[str, Dict[str, torch.Tensor]]] = None,
     ):
         """
         Initialize FlowerVLA Policy.
 
         Args:
             config: FlowerVLAConfig instance with all hyperparameters
-            dataset_stats: Optional normalization statistics (not used, kept for compatibility)
         """
         super().__init__(config)
 
         config.validate_features()
         self.config = config
-        # self.dataset_stats = dataset_stats
         self.model = FlowerModel(config)
 
-        # Expose important attributes from model for easy access
-        self.action_dim = self.model.action_dim
-        self.act_window_size = self.model.act_window_size
-        self.return_act_chunk = self.model.return_act_chunk
-        self.device = self.model.device
-
-        self.reset()
+        self.model.reset()
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -113,46 +105,6 @@ class FlowerVLAPolicy(PreTrainedPolicy):
         result = self.forward(batch)
         return result["loss"], result["loss_dict"]
 
-    @torch.no_grad()
-    def select_action(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """
-        Select action for inference (LeRobot protocol).
-
-        Args:
-            batch: Observation batch
-
-        Returns:
-            Selected action [B, action_dim]
-        """
-        # Encode observations
-        cond = self.model.encode_observations(batch)
-
-        # Sample noise
-        B = cond["features"].shape[0]
-        noise = torch.randn(
-            B, self.act_window_size, self.action_dim, device=self.device
-        )
-
-        # Sample actions
-        action_seq = self.model.sample_actions(noise, cond, inference=True)
-
-        # Return first action
-        if self.return_act_chunk:
-            return action_seq  # [B, T, action_dim]
-        else:
-            return action_seq[:, 0, :]  # [B, action_dim]
-
-    # ==================== Rollout Methods ====================
-
-    def reset(self):
-        """Reset rollout state."""
-        self.rollout_step_counter = 0
-        self.pred_action_seq = None
-        self.eval()
-
-    def get_optim_params(self) -> dict:
-        return self.parameters()
-
 
 class FlowerModel(nn.Module):
     """
@@ -161,77 +113,193 @@ class FlowerModel(nn.Module):
 
     def __init__(self, config: FlowerVLAConfig):
         super().__init__()
-        self.config = config
         # Core attributes
         self.device = torch.device(
             config.device
             if hasattr(config, "device") and config.device
             else ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        self.action_dim = config.action_dim
-        self.act_window_size = config.act_window_size
-        self.multistep = config.multistep
-        self.num_sampling_steps = config.num_sampling_steps
-        self.dit_dim = config.dit_dim
 
-        # Modalities (required for data access)
-        # These will be set by LeRobot's dataloader based on the config
-        self.obs_modalities = "observation"
-        self.goal_modalities = "task"
-        self.target_modality = "action"
-        self.lang_modalities = ["language_instruction"]
-        self.second_view_key = config.second_view_key
+        # Initialize configuration groups.
+        self._init_modalities(
+            config.target_modality,
+            config.obs_modalities,
+            config.goal_modalities,
+            config.img_modalities,
+            config.lang_modalities,
+        )
+        self._init_dimensions(
+            config.dit_dim,
+            config.n_heads,
+            config.lowdim_obs_dim,
+            config.action_dim,
+            config.act_window_size,
+            config.multistep,
+            config.num_sampling_steps,
+        )
+        self._init_flags(
+            config.use_second_view,
+            config.use_causal_attention,
+            config.use_cross_attn,
+            config.use_adaln_cond,
+            config.use_readout_token,
+            config.use_rope,
+            config.use_nope,
+            config.vlm_prompt_style,
+            config.token_dropout,
+            config.action_type_adaln,
+            config.sampling_type,
+            config.use_proprio,
+            config.return_act_chunk,
+            config.second_view_key,
+            config.cfg_dropout,
+            config.cfg_lambda,
+        )
 
-        # Flags
-        self.use_second_view = config.use_second_view
-        self.use_cross_attn = config.use_cross_attn
-        self.use_rope = config.use_rope
-        self.use_nope = config.use_nope
-        self.use_proprio = config.use_proprio
-        self.return_act_chunk = config.return_act_chunk
-        self.token_dropout = config.token_dropout
-        self.cfg_dropout = config.cfg_dropout
-        self.cfg_lambda = config.cfg_lambda
-        self.sampling_type = config.sampling_type
-        self.train_vlm = not config.freeze_florence
-        self.use_adaln_cond = config.use_adaln_cond
-        self.use_readout_token = config.use_readout_token
-        self.action_type_adaln = config.action_type_adaln
-
+        logger.info("Configuration (modalities, dimensions, flags) initialized.")
         # Initialize action space index
         self.action_space_index = ActionIndex()
 
-        # Setup VLM (Florence-2)
-        self._setup_vlm(config)
+        self._setup_vlm(
+            config.vlm_path,
+            config.freeze_vision_tower,
+            config.freeze_florence,
+            config.freeze_embeddings_only,
+        )
+        hidden_dim = self.vlm.config.text_config.d_model
+        self.vlm_latent_dim = hidden_dim
+        self.use_dopri5 = False
+        self._setup_dit_components(
+            config.dit_dim,
+            config.n_heads,
+            config.n_layers,
+            config.action_dim,
+            config.act_window_size,
+            hidden_dim,
+            config.attn_pdrop,
+            config.resid_pdrop,
+            config.mlp_pdrop,
+            config.use_cross_attn,
+            config.use_rope,
+            config.use_nope,
+            config.query_seq_len,
+            config.rope_theta,
+        )
+        logger.info("VLM and DiT components set up.")
 
-        # Setup DiT components
-        self._setup_dit_components(config)
-
-        # Rollout state
+        # Initialize rollout state.
         self.rollout_step_counter = 0
         self.pred_action_seq = None
 
-    def _count_parameters(self) -> str:
-        """Count trainable parameters."""
-        total = sum(p.numel() for p in self.parameters())
-        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        return f"{trainable / 1e6:.1f}M/{total / 1e6:.1f}M trainable/total"
+        # Ensure that all parameters and buffers are on the correct device.
+        self.ensure_device_consistency()
 
-    def _setup_vlm(self, config: FlowerVLAConfig):
-        """Setup Florence-2 VLM and tokenizer."""
-        logger.info(f"Loading VLM from {config.vlm_path}")
+    # === Initialization Helpers ===
+    def _init_modalities(
+        self,
+        target_modality: str,
+        obs_modalities: str,
+        goal_modalities: str,
+        img_modalities: List[str],
+        lang_modalities: List[str],
+    ) -> None:
+        """Initializes modality-related attributes."""
+        self.target_modality = target_modality
+        self.obs_modalities = obs_modalities
+        self.goal_modalities = goal_modalities
+        self.img_modalities = img_modalities
+        self.lang_modalities = lang_modalities
 
-        # Load VLM
+    def _init_dimensions(
+        self,
+        dit_dim: int,
+        n_heads: int,
+        lowdim_obs_dim: int,
+        action_dim: int,
+        act_window_size: int,
+        multistep: int,
+        num_sampling_steps: int,
+    ) -> None:
+        """Initializes dimension-related attributes and checks consistency."""
+        if dit_dim % n_heads != 0:
+            raise ValueError(
+                f"dit_dim ({dit_dim}) must be divisible by n_heads ({n_heads})"
+            )
+        self.lowdim_obs_dim = lowdim_obs_dim
+        self.action_dim = action_dim
+        self.act_window_size = act_window_size
+        self.multistep = multistep
+        self.num_sampling_steps = num_sampling_steps
+        self.dit_dim = dit_dim
+
+    def _init_flags(
+        self,
+        use_second_view: bool,
+        use_causal_attention: bool,
+        use_cross_attn: bool,
+        use_adaln_cond: bool,
+        use_readout_token: bool,
+        use_rope: bool,
+        use_nope: bool,
+        vlm_prompt_style: str,
+        token_dropout: float,
+        action_type_adaln: bool,
+        sampling_type: str,
+        use_proprio: bool,
+        return_act_chunk: bool,
+        second_view_key: str,
+        cfg_dropout: float,
+        cfg_lambda: float,
+    ) -> None:
+        """Initializes boolean flags and related parameters."""
+        if vlm_prompt_style not in ["default", "feature_focused", "state_oriented"]:
+            raise ValueError("Invalid VLM prompt style")
+        if sampling_type not in [
+            "ln",
+            "pi_zero",
+            "loglogistic",
+            "uniform",
+            "stratified",
+        ]:
+            raise ValueError(f"Invalid sampling type: {sampling_type}")
+        self.use_second_view = use_second_view
+        self.use_causal_attention = use_causal_attention
+        self.use_cross_attn = use_cross_attn
+        self.use_adaln_cond = use_adaln_cond
+        self.use_readout_token = use_readout_token
+        self.use_rope = use_rope
+        self.use_nope = use_nope
+        self.use_proprio = use_proprio
+        self.return_act_chunk = return_act_chunk
+        self.vlm_prompt_style = vlm_prompt_style
+        self.token_dropout = token_dropout
+        self.action_type_adaln = action_type_adaln
+        self.sampling_type = sampling_type
+        self.second_view_key = second_view_key
+        self.cfg_dropout = cfg_dropout
+        self.cfg_lambda = cfg_lambda
+
+    def _setup_vlm(
+        self,
+        vlm_path: str,
+        freeze_vision_tower: bool,
+        freeze_florence: bool,
+        freeze_embeddings_only: bool,
+    ) -> None:
+        """
+        Loads the pretrained VLM, sets up the processor/tokenizer, adds a prompt token,
+        and optionally freezes parameters.
+        """
+        logger.info(f"Loading VLM from {vlm_path}")
         self.vlm = AutoModelForCausalLM.from_pretrained(
-            config.vlm_path, trust_remote_code=True
+            vlm_path, trust_remote_code=True
         )
+        self.train_vlm = not freeze_florence
 
-        # Freeze/unfreeze parameters
-        if config.freeze_florence:
+        if freeze_florence:
             for param in self.vlm.parameters():
                 param.requires_grad = False
-        elif config.freeze_embeddings_only:
-            # Freeze only embeddings
+        elif freeze_embeddings_only:
             embedding_layer = self.vlm.get_input_embeddings()
             for param in embedding_layer.parameters():
                 param.requires_grad = False
@@ -239,113 +307,140 @@ class FlowerModel(nn.Module):
                 for param in self.vlm.language_model.shared.parameters():
                     param.requires_grad = False
 
-        if not config.freeze_vision_tower:
+        if not freeze_vision_tower:
             for param in self.vlm.vision_tower.parameters():
                 param.requires_grad = True
 
-        # Setup processor and tokenizer
-        self.processor = AutoProcessor.from_pretrained(
-            config.vlm_path, trust_remote_code=True
-        )
+        self.processor = AutoProcessor.from_pretrained(vlm_path, trust_remote_code=True)
         self.tokenizer = self.processor.tokenizer
-
-        # Create special <Flow> prompt token
         self.prompt_embeds = self._create_prompt_embed("<Flow>").to(self.device)
-
-        # Remove decoder (encoder-only mode)
         del self.vlm.language_model.model.decoder, self.vlm.language_model.lm_head
-
-        # Token dropout
         self.vlm_token_dropout = nn.Dropout(self.token_dropout)
+        # self.vlm_latent_dim = self.vlm.config.text_config.d_model
 
-        # Store VLM hidden dim
-        self.vlm_latent_dim = self.vlm.config.text_config.d_model
-
-    def _setup_dit_components(self, config: FlowerVLAConfig):
-        """Setup DiT (Diffusion Transformer) components."""
-        hidden_dim = self.vlm_latent_dim
-
+    def _setup_dit_components(
+        self,
+        dit_dim: int,
+        n_heads: int,
+        n_layers: int,
+        action_dim: int,
+        act_window_size: int,
+        hidden_dim: int,
+        attn_pdrop: float,
+        resid_pdrop: float,
+        mlp_pdrop: float,
+        use_cross_attn: bool,
+        use_rope: bool,
+        use_nope: bool,
+        query_seq_len: int,
+        rope_theta: float,
+    ) -> None:
+        """
+        Sets up the Diffusion Transformer (DiT) components including action-specific
+        encoders/decoders and shared conditioning components.
+        """
         # Initialize module dictionaries
         self.action_encoders = nn.ModuleDict()
         self.action_decoders = nn.ModuleDict()
         if self.use_proprio:
             self.proprio_encoders = nn.ModuleDict()
-        self.adaln = nn.ModuleDict() if config.action_type_adaln else None
+        self.adaln = nn.ModuleDict() if self.action_type_adaln else None
 
-        # Setup action-specific components for each action space
+        # Set up action-specific components
         for action_name, action_idx in self.action_space_index.action_spaces.items():
             input_dim = self.action_space_index.get_action_dim(action_idx)
 
-            # Action encoder (input_dim -> dit_dim)
+            # Action encoder/decoder
             self.action_encoders[action_name] = Mlp(
                 in_features=input_dim,
-                hidden_features=config.dit_dim,
-                out_features=config.dit_dim,
+                hidden_features=dit_dim,
+                out_features=dit_dim,
                 bias=True,
             )
-
-            # Action decoder (dit_dim -> input_dim)
-            self.action_decoders[action_name] = nn.Linear(config.dit_dim, input_dim)
+            self.action_decoders[action_name] = nn.Linear(dit_dim, input_dim).to(
+                self.device
+            )
 
             # Action-specific AdaLN
-            if config.action_type_adaln:
+            if self.action_type_adaln:
                 self.adaln[action_name] = SharedAdaLNController(
-                    config.dit_dim,
-                    global_conddim=config.dit_dim,
-                    use_cross_attn=config.use_cross_attn,
+                    dit_dim, global_conddim=dit_dim, use_cross_attn=use_cross_attn
                 )
 
             # Proprioceptive encoders
             if self.use_proprio:
                 if action_name == "bimanual_nav":
                     self.proprio_encoders[action_name] = Mlp(
-                        input_dim, config.dit_dim, out_features=config.dit_dim, drop=0.2
-                    )
+                        input_dim, dit_dim, out_features=dit_dim, drop=0.2
+                    ).to(self.device)
                 else:
                     self.proprio_encoders[action_name] = ZeroEncoder(
-                        config.dit_dim, device=self.device
+                        self.dit_dim, device=self.device
                     )
 
-        # Setup shared AdaLN if not using action-specific
-        if not config.action_type_adaln:
+        # Set up shared AdaLN if not using action-specific AdaLN
+        if not self.action_type_adaln:
             self.adaln = SharedAdaLNController(
-                config.dit_dim,
-                global_conddim=config.dit_dim,
-                use_cross_attn=config.use_cross_attn,
+                dit_dim, global_conddim=dit_dim, use_cross_attn=use_cross_attn
             )
 
-        # Shared conditioning components
-        self.cond_linear = nn.Linear(hidden_dim, config.dit_dim, bias=False)
-        self.t_embedder = TimestepEmbedder(config.dit_dim)
+        # Set up shared conditioning components
+        self.cond_linear = nn.Linear(hidden_dim, dit_dim, bias=False)
+        self.t_embedder = TimestepEmbedder(dit_dim)
         self.cond_norm = RmsNorm(hidden_dim)
-        self.frequency_embedder = FreqEmbedder(config.dit_dim)
+        self.frequency_embedder = FreqEmbedder(dit_dim)
         self.action_space_embedder = ActionSpaceEmbedderParameter(
-            config.dit_dim, max_actions=len(self.action_space_index.action_spaces)
+            dit_dim, max_actions=len(self.action_space_index.action_spaces)
         )
 
-        # Positional encoding (if not using RoPE or NoPE)
-        if not config.use_rope and not config.use_nope:
+        # Set up positional encoding if neither RoPE nor NoPE is used
+        if not use_rope and not use_nope:
             self.positional_encoding = nn.Parameter(
-                torch.randn(1, config.act_window_size, config.dit_dim) * 0.1
+                torch.randn(1, act_window_size, dit_dim) * 0.1
             )
 
-        # DiT blocks
+        # Set up DiT blocks
         self.dit = nn.ModuleList(
             [
                 FlowBlock(
-                    dim=config.dit_dim,
-                    heads=config.n_heads,
-                    attn_pdrop=config.attn_pdrop,
-                    resid_pdrop=config.resid_pdrop,
-                    mlp_pdrop=config.mlp_pdrop,
-                    use_cross_attn=config.use_cross_attn,
-                    use_rope=config.use_rope,
-                    query_seq_len=config.query_seq_len,
-                    rope_theta=config.rope_theta,
+                    dim=dit_dim,
+                    heads=n_heads,
+                    attn_pdrop=attn_pdrop,
+                    resid_pdrop=resid_pdrop,
+                    mlp_pdrop=mlp_pdrop,
+                    use_cross_attn=use_cross_attn,
+                    use_rope=use_rope,
+                    query_seq_len=query_seq_len,
+                    rope_theta=rope_theta,
                 )
-                for _ in range(config.n_layers)
+                for _ in range(n_layers)
             ]
         )
+
+    def _verify_device_consistency(self) -> None:
+        """Verifies that all parameters and buffers are on the expected device."""
+        expected = self.device
+        inconsistent = []
+        for name, param in self.named_parameters():
+            if param.device != expected:
+                inconsistent.append(f"{name}: {param.device} (expected {expected})")
+        for name, buf in self.named_buffers():
+            if buf.device != expected:
+                inconsistent.append(
+                    f"{name} (buffer): {buf.device} (expected {expected})"
+                )
+        if inconsistent:
+            logger.warning("Device consistency issues: " + "; ".join(inconsistent))
+
+    def ensure_device_consistency(self) -> None:
+        """Moves the entire model (and buffers) to the designated device."""
+        self.to(self.device)
+        self.vlm.to(self.device)
+        if not self.use_rope and hasattr(self, "positional_encoding"):
+            self.positional_encoding = self.positional_encoding.to(self.device)
+        if self.use_readout_token and hasattr(self, "register_token"):
+            self.register_token = self.register_token.to(self.device)
+        self._verify_device_consistency()
 
     def _create_prompt_embed(self, prompt_text: str) -> nn.Parameter:
         """
@@ -371,19 +466,12 @@ class FlowerModel(nn.Module):
         Returns:
             Dictionary with loss and other outputs
         """
-        # Encode observations
-        cond = self.encode_observations(batch)
+        obs_features = self.encode_observations(batch)
+        action_loss, losses_dict = self.rf_loss(
+            obs_features, batch[self.target_modality], batch["task"]["dataset_index"]
+        )
 
-        # Extract actions (support both formats)
-        if "action" in batch:
-            actions = batch["action"]
-        else:
-            actions = batch[self.target_modality]
-
-        # Compute loss
-        loss, loss_dict = self.rf_loss(cond, actions)
-
-        return {"loss": loss, "loss_dict": loss_dict}
+        return {"loss": action_loss, "loss_dict": losses_dict}
 
     def encode_observations(self, batch: Dict) -> Dict[str, torch.Tensor]:
         """
@@ -666,6 +754,7 @@ class FlowerModel(nn.Module):
 
         return mod_signals
 
+    # === Loss Functions ===
     def rf_loss(
         self, cond: dict, actions: torch.Tensor, dataset_idx: Any = None
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
@@ -738,9 +827,9 @@ class FlowerModel(nn.Module):
             "diff_mean": valid_diff.mean().item(),
             "loss": loss.item(),
         }
-
         return loss, losses_dict
 
+    # === Sampling Methods ===
     def sample_actions(
         self, z: torch.Tensor, cond: Dict[str, torch.Tensor], inference: bool = False
     ) -> torch.Tensor:
@@ -766,16 +855,7 @@ class FlowerModel(nn.Module):
     ) -> torch.Tensor:
         """
         Samples actions using an adaptive ODE solver (dopri5).
-        Requires torchdiffeq package.
         """
-        try:
-            from torchdiffeq import odeint
-        except ImportError:
-            raise ImportError(
-                "torchdiffeq is required for adaptive ODE solver. "
-                "Install with: pip install torchdiffeq"
-            )
-
         device = z.device
         action_type = cond["action_type"]
 
@@ -823,7 +903,6 @@ class FlowerModel(nn.Module):
     ) -> torch.Tensor:
         """
         Samples actions using fixed-step Euler integration.
-        Supports Classifier-Free Guidance (CFG) during inference.
         """
         steps = self.num_sampling_steps if inference else 5
         b = z.size(0)
@@ -848,9 +927,9 @@ class FlowerModel(nn.Module):
             # Clone features to avoid modifying original
             features = null_cond["features"].clone()
 
-            # Calculate where text features begin based on encode_observations method
+            # Calculate where text features begin based on your encode_observations method
             prompt_length = self.prompt_embeds.shape[1]
-            image_length = 50 if not self.use_second_view else 100
+            image_length = 50 if self.use_second_view is False else 100
 
             # Zero out only the text portion (after prompt and image features)
             text_start = prompt_length + image_length
@@ -885,3 +964,63 @@ class FlowerModel(nn.Module):
                     z[mask, :, adim:] = 0.0
 
         return z.clamp(-1, 1)
+
+    def reset(self) -> None:
+        """
+        Resets the rollout state.
+        """
+        self.rollout_step_counter = 0
+        self.pred_action_seq = None
+        self.eval()
+
+    @torch.no_grad()
+    def select_action(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Select action for inference (LeRobot protocol).
+        This method follows LeRobot conventions:
+        - Returns single action per timestep by default
+        - Used by LeRobot's evaluation/deployment pipeline
+
+        Args:
+            batch: Observation batch
+
+        Returns:
+            Selected action [B, action_dim]
+        """
+        # Encode observations
+        cond = self.model.encode_observations(batch)
+
+        # Sample noise
+        B = cond["features"].shape[0]
+        noise = torch.randn(
+            B, self.act_window_size, self.action_dim, device=self.device
+        )
+
+        # Sample actions
+        action_seq = self.model.sample_actions(noise, cond, inference=True)
+
+        # Return first action
+        if self.return_act_chunk:
+            return action_seq  # [B, T, action_dim]
+        else:
+            return action_seq[:, 0, :]  # [B, action_dim]
+
+    def get_optim_params(self) -> dict:
+        return self.parameters()
+
+    def step(self, obs: Dict, goal: Dict) -> torch.Tensor:
+        """
+        Returns the current action (or full chunk) based on the rollout step and updates the state.
+        """
+        if self.rollout_step_counter % self.multistep == 0:
+            self.pred_action_seq = self(obs, goal)
+        if not self.return_act_chunk:
+            current_action = self.pred_action_seq[0, self.rollout_step_counter]
+            if len(current_action.shape) == 2:
+                current_action = einops.rearrange(current_action, "b d -> b 1 d")
+        else:
+            current_action = self.pred_action_seq
+        self.rollout_step_counter += 1
+        if self.rollout_step_counter == self.multistep:
+            self.rollout_step_counter = 0
+        return current_action

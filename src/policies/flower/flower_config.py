@@ -12,6 +12,11 @@ from lerobot.optim.schedulers import (
 @PreTrainedConfig.register_subclass("flower")
 @dataclass
 class FlowerVLAConfig(PreTrainedConfig):
+    obs_modalities = "observation"
+    goal_modalities = "task"
+    target_modality = "action"
+    lang_modalities = ["language_instruction"]
+    img_modalities = ["image_primary"]
     # VLM configuration
     vlm_path: str = "microsoft/Florence-2-base"
     freeze_florence: bool = False
