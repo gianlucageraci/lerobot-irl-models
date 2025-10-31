@@ -222,14 +222,18 @@ class FlowerAttention(nn.Module):
             q, k = apply_rotary_pos_emb(q, k, self.cos, self.sin)
         # Build causal mask if needed.
         if is_causal and custom_attn_mask is None:
-            mask = torch.triu(
-                torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=1
-            )
-            mask = mask.unsqueeze(0).unsqueeze(0)
-        elif custom_attn_mask is not None:
-            mask = custom_attn_mask.unsqueeze(1).expand(-1, self.n_heads, -1, -1)
-        else:
+            # Use built-in causal attention
             mask = None
+            use_is_causal = True
+        elif custom_attn_mask is not None:
+            # Use explicit mask
+            mask = custom_attn_mask.unsqueeze(1).expand(-1, self.n_heads, -1, -1)
+            use_is_causal = False
+        else:
+            # No masking
+            mask = None
+            use_is_causal = False
+        
         # Use PyTorch's built-in scaled dot-product attention.
         attn_output = F.scaled_dot_product_attention(
             q,
@@ -238,7 +242,7 @@ class FlowerAttention(nn.Module):
             attn_mask=None if mask is None else ~mask,
             dropout_p=self.attn_dropout.p if self.training else 0.0,
             scale=self.scale,
-            is_causal=is_causal if custom_attn_mask is None else False,
+            is_causal=use_is_causal,
         )
         out = attn_output.transpose(1, 2).reshape(B, T, C)
         out = self.resid_dropout(self.proj(out))
