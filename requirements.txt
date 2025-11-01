@@ -23,3 +23,6 @@ gymnasium>=0.28.0
 # Utilities
 tqdm>=4.65.0
 pyyaml>=6.0
+
+pyaudio
+moviepy
