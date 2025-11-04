@@ -94,8 +94,56 @@ def main(cfg: DictConfig) -> None:
     if hasattr(cfg, "checkpoint_path") and cfg.checkpoint_path:
         log.info(f"Loading pretrained model from {cfg.checkpoint_path}")
         checkpoint = torch.load(cfg.checkpoint_path, map_location=cfg.device)
-        agent.load_state_dict(checkpoint)
-        log.info("Model loaded successfully")
+
+        # If checkpoint is a dict with 'model' or 'state_dict' key, extract it
+        if isinstance(checkpoint, dict):
+            if "model" in checkpoint:
+                state_dict = checkpoint["model"]
+            elif "state_dict" in checkpoint:
+                state_dict = checkpoint["state_dict"]
+            else:
+                state_dict = checkpoint
+        else:
+            state_dict = checkpoint
+
+        # Fix key naming: remove 'agent.' prefix if present and replace with 'model.'
+        # This handles checkpoints saved with different wrapper prefixes
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            # Remove common prefixes that might differ between training and inference
+            new_key = key
+            if key.startswith("agent."):
+                new_key = "model." + key[6:]  # Remove 'agent.' and add 'model.'
+            elif key.startswith("policy."):
+                new_key = "model." + key[7:]  # Remove 'policy.' and add 'model.'
+            elif not key.startswith("model."):
+                # If no prefix, add 'model.'
+                new_key = "model." + key
+            new_state_dict[new_key] = value
+
+        log.info(f"Preprocessed {len(new_state_dict)} keys from checkpoint")
+
+        # Load with strict=False to allow partial loading
+        missing_keys, unexpected_keys = agent.load_state_dict(
+            new_state_dict, strict=False
+        )
+
+        if missing_keys:
+            log.warning(f"Missing keys in checkpoint ({len(missing_keys)} total):")
+            log.warning(f"  First few: {missing_keys[:5]}")
+            log.warning("  → These parameters will use random initialization!")
+
+        if unexpected_keys:
+            log.warning(
+                f"Unexpected keys in checkpoint ({len(unexpected_keys)} total):"
+            )
+            log.warning(f"  First few: {unexpected_keys[:5]}")
+            log.warning("  → These parameters from checkpoint will be ignored!")
+
+        if not missing_keys and not unexpected_keys:
+            log.info("✅ All parameters loaded successfully!")
+        else:
+            log.info("⚠️  Model loaded with warnings (see above)")
 
     # Move agent to device
     agent = agent.to(cfg.device)

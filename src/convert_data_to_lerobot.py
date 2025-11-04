@@ -72,9 +72,8 @@ def _read_png_folder(folder: Path, resize: Optional[Tuple[int, int]]) -> np.ndar
         frames.append(img_rgb)
     if not frames:
         raise RuntimeError(f"Failed to load any images from {folder}")
-    arr = np.stack(frames, axis=0).astype(np.uint8)  # [T, H, W, 3]
-    # Convert to channel-first format (T, C, H, W) expected by LeRobot
-    return np.transpose(arr, (0, 3, 1, 2))
+    arr = np.stack(frames, axis=0)  # [T, H, W, 3]
+    return arr.astype(np.uint8)
 
 
 def _find_episode_dirs(root: Path, leader_subdir: str) -> List[Path]:
@@ -125,22 +124,22 @@ def _build_features_spec(
 ) -> Dict[str, dict]:
     """
     Build the LeRobot feature spec dictionary.
-    image_shapes/tactile_shapes: dict cam_name -> (H, W, 3)
+    image_shapes/tactile_shapes: dict cam_name -> (H, W, C) but LeRobot expects (C, H, W)
     """
     dtype_choice = "video" if use_videos else "image"
 
     features = {}
-    for k, (c, h, w) in image_shapes.items():
+    for k, (h, w, c) in image_shapes.items():
         features[f"observation.images.{k}"] = {
             "dtype": dtype_choice,
             "shape": (c, h, w),
-            "names": ["channels", "height", "width"],
+            "names": ["channel", "height", "width"],
         }
-    for k, (c, h, w) in tactile_shapes.items():
+    for k, (h, w, c) in tactile_shapes.items():
         features[f"observation.images.{k}"] = {
             "dtype": dtype_choice,
             "shape": (c, h, w),
-            "names": ["channels", "height", "width"],
+            "names": ["channel", "height", "width"],
         }
 
     # State: 7 joints
@@ -251,17 +250,19 @@ def save_episode_to_lerobot(
     for i in range(T - 1):
         image_dict = {}
         for cam, arr in cam_trimmed.items():
-            image_dict[f"observation.images.{cam}"] = arr[i]
+            # Convert from (H, W, C) to (C, H, W) for LeRobot
+            image_dict[f"observation.images.{cam}"] = np.transpose(arr[i], (2, 0, 1))
         for tname, arr in tactile_trimmed.items():
-            image_dict[f"observation.images.{tname}"] = arr[i]
+            # Convert from (H, W, C) to (C, H, W) for LeRobot
+            image_dict[f"observation.images.{tname}"] = np.transpose(arr[i], (2, 0, 1))
 
         lerobot_ds.add_frame(
             {
                 **image_dict,
                 "observation.state": state_np[i],
                 "action": action_np[i],
-                "task": "Pick up a Snickers and put it on the hand.",
-            }
+                "task": task,
+            },
         )
     lerobot_ds.save_episode()
 
