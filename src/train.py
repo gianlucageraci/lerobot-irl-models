@@ -148,6 +148,7 @@ def train(cfg: DictConfig) -> None:
         save_freq=cfg.training.save_freq,
         log_freq=cfg.training.log_freq,
         wandb=wandb_cfg,
+        push_to_hub=False,  # Disable pushing to Hugging Face Hub
     )
 
     # Handle pretrained weights loading for fine-tuning
