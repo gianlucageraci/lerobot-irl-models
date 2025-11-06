@@ -101,45 +101,33 @@ def train(cfg: DictConfig) -> None:
         make_pre_post_processors_with_flower,
     )
 
-    # Instantiate policy configuration
     policy_config = instantiate_policy_config(cfg.policy)
-
-    # Set up dataset configuration for local dataset
-    # For local datasets stored on disk, root should point to the dataset folder
     dataset_path = Path(cfg.dataset.root)
+
     log.info(f"Loading local dataset from: {dataset_path}")
 
-    # Check if dataset exists and has required metadata
     meta_dir = dataset_path / "meta"
     info_file = meta_dir / "info.json"
 
     if not dataset_path.exists():
-        raise FileNotFoundError(
-            f"Dataset directory not found at: {dataset_path}\n"
-            f"Please check your dataset.root in the config."
-        )
+        raise FileNotFoundError(f"Dataset directory not found at: {dataset_path}\n")
 
     if not info_file.exists():
-        raise FileNotFoundError(
-            f"Dataset metadata not found at: {info_file}\n"
-            f"Make sure your dataset is in LeRobot format with a meta/info.json file."
-        )
+        raise FileNotFoundError(f"Dataset metadata not found at: {info_file}\n")
 
     dataset_cfg = DatasetConfig(
-        repo_id=cfg.dataset.repo_id,  # Dataset name (for logging/identification)
-        root=str(dataset_path),  # Full path to dataset directory
-        video_backend="pyav",  # Use PyAV instead of torchcodec to avoid FFmpeg issues
+        repo_id=cfg.dataset.repo_id,
+        root=str(dataset_path),
+        video_backend="pyav",
     )
 
-    # Set up W&B configuration
     wandb_cfg = WandBConfig(
         enable=cfg.wandb.enable,
-        project=cfg.wandb.project.replace("${policy_name}", "flower"),
+        project=cfg.wandb.project,
         entity=cfg.wandb.entity,
-        mode=cfg.wandb.mode if cfg.wandb.enable else "disabled",
+        mode=cfg.wandb.mode,
     )
 
-    # Set up training pipeline configuration
     train_cfg = TrainPipelineConfig(
         policy=policy_config,
         dataset=dataset_cfg,
@@ -150,14 +138,10 @@ def train(cfg: DictConfig) -> None:
         wandb=wandb_cfg,
     )
 
-    # Handle pretrained weights loading for fine-tuning
     if hasattr(cfg, "pretrained_policy_path") and cfg.pretrained_policy_path:
         log.info(f"Loading pretrained weights from: {cfg.pretrained_policy_path}")
 
-        # Create policy instance and load weights
         policy = FlowerVLAPolicy(policy_config)
-
-        # Load checkpoint
         checkpoint = torch.load(cfg.pretrained_policy_path, map_location="cpu")
 
         # Handle different checkpoint formats
@@ -169,7 +153,6 @@ def train(cfg: DictConfig) -> None:
             elif "model" in checkpoint:
                 state_dict = checkpoint["model"]
             else:
-                # Assume checkpoint is the state dict itself
                 state_dict = checkpoint
         else:
             state_dict = checkpoint
@@ -179,12 +162,8 @@ def train(cfg: DictConfig) -> None:
         new_state_dict = {}
         for key, value in state_dict.items():
             new_key = key
-
-            # Replace 'agent.' with 'model.'
             if new_key.startswith("agent."):
-                new_key = "model." + new_key[6:]  # Remove 'agent.' and add 'model.'
-
-            # Map MLP layer names
+                new_key = "model." + new_key[6:]
             new_key = new_key.replace(".mlp.c_fc1.", ".mlp.fc1.")
             new_key = new_key.replace(".mlp.c_fc2.", ".mlp.fc2.")
             new_key = new_key.replace(".mlp.c_proj.", ".mlp.proj.")
@@ -192,11 +171,6 @@ def train(cfg: DictConfig) -> None:
             new_state_dict[new_key] = value
 
         state_dict = new_state_dict
-        log.info(
-            f"Mapped checkpoint keys: {len([k for k in state_dict.keys() if k.startswith('model.')])} model keys"
-        )
-
-        # Load weights (non-strict to allow for fine-tuning with different architectures)
         missing_keys, unexpected_keys = policy.load_state_dict(state_dict, strict=False)
 
         if missing_keys:
@@ -205,17 +179,8 @@ def train(cfg: DictConfig) -> None:
             log.warning(f"Unexpected keys when loading checkpoint: {unexpected_keys}")
 
         log.info("Pretrained weights loaded successfully!")
-
-        # Store the loaded policy in train_cfg
         train_cfg.pretrained_policy = policy
 
-    if hasattr(cfg, "resume_from_checkpoint") and cfg.resume_from_checkpoint:
-        log.info(f"Resuming from checkpoint: {cfg.resume_from_checkpoint}")
-        train_cfg.resume = True
-        train_cfg.resume_path = cfg.resume_from_checkpoint
-
-    # Initialize logging and start training
-    # Import training module late (after patching) and run
     lerobot_train_module = importlib.import_module("lerobot.scripts.lerobot_train")
     lerobot_train_module.init_logging()
     lerobot_train_module.train(train_cfg)

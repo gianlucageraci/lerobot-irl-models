@@ -1,13 +1,8 @@
 import argparse
 import pathlib
-from copy import deepcopy
-from pprint import pprint
 
-import numpy
 from lerobot.configs.default import DatasetConfig, WandBConfig
-from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.policies import factory
 from lerobot.scripts.lerobot_train import train as lerobot_train
 from lerobot.utils.utils import init_logging
@@ -38,10 +33,10 @@ def train(data_dir="data"):
     cfg = TrainPipelineConfig(
         policy=pretrained_config,
         dataset=dataset_cfg,
-        batch_size=192,
-        steps=32000,
+        batch_size=16,
+        steps=60,
         save_freq=4000,
-        log_freq=200,
+        log_freq=1,
         wandb=get_wandb_config(),
     )
 
@@ -57,10 +52,9 @@ def get_beso(typename: str, **kwargs):
 
 def get_wandb_config():
     wandb_config = WandBConfig(
-        enable=True,
+        enable=False,
         project="beso_lerobot",
-        entity="stepanfedunyak-karlsruhe-institute-of-technology",
-        mode="online",
+        mode="disabled",
     )
     return wandb_config
 
