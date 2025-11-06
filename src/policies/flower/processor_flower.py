@@ -1,9 +1,3 @@
-"""
-Flower policy processors: pre/post pipelines compatible with LeRobot factory.
-
-This mirrors the SmolVLA pattern (make_smolvla_pre_post_processors) and avoids
-editing site-packages by exposing a function we can hook into the factory at runtime.
-"""
 from typing import Any, Tuple
 
 import torch

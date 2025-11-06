@@ -5,7 +5,7 @@ numpy>=1.24.0
 einops>=0.7.0
 
 # Lerobot framework
-lerobot
+lerobot>=0.4.0
 
 # Deep learning and transformers
 transformers>=4.30.0
