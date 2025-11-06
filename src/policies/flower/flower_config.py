@@ -1,12 +1,9 @@
-from typing import Dict, List
 from dataclasses import dataclass, field
+from typing import Dict, List
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.optim.optimizers import AdamWConfig
-
-from lerobot.optim.schedulers import (
-    CosineDecayWithWarmupSchedulerConfig,
-)
+from lerobot.optim.schedulers import CosineDecayWithWarmupSchedulerConfig
 
 
 @PreTrainedConfig.register_subclass("flower")
@@ -18,9 +15,9 @@ class FlowerVLAConfig(PreTrainedConfig):
     lang_modalities = ["language_instruction"]
     img_modalities = ["image_primary"]
     # VLM configuration
-    vlm_path: str = "microsoft/Florence-2-base"
-    freeze_florence: bool = False
-    freeze_vision_tower: bool = False
+    vlm_path: str = "microsoft/Florence-2-large"
+    freeze_florence: bool = True
+    freeze_vision_tower: bool = True
     freeze_embeddings_only: bool = True
     vlm_prompt_style: str = "default"
     token_dropout: float = 0.1
@@ -42,10 +39,10 @@ class FlowerVLAConfig(PreTrainedConfig):
     second_view_key: str = "image_secondary"
 
     # DiT architecture
-    dit_dim: int = 768
-    n_heads: int = 8
+    dit_dim: int = 1024
+    n_heads: int = 16
     n_layers: int = 12
-    attn_pdrop: float = 0.3
+    attn_pdrop: float = 0.1
     resid_pdrop: float = 0.1
     mlp_pdrop: float = 0.1
 
