@@ -1,91 +1,116 @@
+import importlib
 import logging
-from typing import Any
+import sys
+from pathlib import Path
 
 import hydra
-from omegaconf import DictConfig, OmegaConf
 import torch
+from omegaconf import DictConfig, OmegaConf
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 from lerobot.configs.default import DatasetConfig, WandBConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.policies import factory
-from lerobot.scripts.lerobot_train import init_logging
-from lerobot.scripts.lerobot_train import train as lerobot_train
+
+from src.policies.flower.flower_config import FlowerVLAConfig
+from src.policies.flower.modeling_flower import FlowerVLAPolicy
+from src.policies.flower.processor_flower import make_flower_pre_post_processors
 
 log = logging.getLogger(__name__)
 
 
-def get_policy_name_from_config(policy_cfg: DictConfig) -> str:
-    """Extract policy name from config target."""
-    target = policy_cfg.get("_target_", "")
-    if "beso" in target.lower():
-        return "beso"
-    elif "flower" in target.lower():
-        return "flower"
-    else:
-        raise ValueError(f"Unknown policy type from target: {target}")
+def get_flower_factory():
+    """Get the policy factory function for Flower."""
+
+    def get_flower(typename: str, **kwargs):
+        return FlowerVLAPolicy
+
+    return get_flower
 
 
-def get_policy_factory(policy_name: str):
-    """Get the policy factory function for the specified policy."""
-    if policy_name.lower() == "beso":
-
-        def get_beso(typename: str, **kwargs):
-            from src.policies.beso.modelling_beso import BesoPolicy
-
-            return BesoPolicy
-
-        return get_beso
-    elif policy_name.lower() == "flower":
-
-        def get_flower(typename: str, **kwargs):
-            from src.policies.flower.modeling_flower import FlowerVLAPolicy
-
-            return FlowerVLAPolicy
-
-        return get_flower
-    else:
-        raise ValueError(f"Unknown policy: {policy_name}. Choose 'beso' or 'flower'.")
-
-
-def instantiate_policy_config(policy_cfg: DictConfig) -> Any:
-    """Instantiate policy configuration from Hydra config."""
-    # Convert OmegaConf to dict and instantiate
+def instantiate_policy_config(policy_cfg: DictConfig) -> FlowerVLAConfig:
+    """Instantiate Flower policy configuration from Hydra config."""
     config_dict = OmegaConf.to_container(policy_cfg, resolve=True)
-
-    # Get the target class
-    target = config_dict.pop("_target_")
-
-    # Import and instantiate the config class
-    if "beso" in target.lower():
-        from src.policies.beso.beso_config import BesoConfig
-
-        return BesoConfig(**config_dict)
-    elif "flower" in target.lower():
-        from src.policies.flower.flower_config import FlowerVLAConfig
-
-        return FlowerVLAConfig(**config_dict)
-    else:
-        raise ValueError(f"Unknown config target: {target}")
+    # Remove _target_ if present
+    config_dict.pop("_target_", None)
+    return FlowerVLAConfig(**config_dict)
 
 
 def train(cfg: DictConfig) -> None:
-    policy_name = get_policy_name_from_config(cfg.policy)
-    log.info(f"Starting training for {policy_name}...")
+    log.info("Starting training for Flower...")
     log.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
 
-    # Set up the policy factory
-    factory.get_policy_class = get_policy_factory(policy_name)
+    # Set up the policy factory for Flower
+    factory.get_policy_class = get_flower_factory()
+
+    # Runtime registration of pre/post processors for Flower
+    from lerobot.policies import factory as policy_factory
+
+    # Keep original to fallback for other policy types
+    original_make_pre_post = policy_factory.make_pre_post_processors
+
+    def make_pre_post_processors_with_flower(*args, **kwargs):
+        """Wrapper matching LeRobot's factory signature."""
+        policy_cfg = kwargs.get("policy_cfg") or (args[0] if len(args) > 0 else None)
+        dataset_stats = kwargs.get("dataset_stats") or (
+            args[1] if len(args) > 1 else None
+        )
+
+        if getattr(policy_cfg, "type", None) == "flower":
+            forwarded = dict(kwargs)
+            forwarded.pop("policy_cfg", None)
+            forwarded.pop("dataset_stats", None)
+            return make_flower_pre_post_processors(
+                policy_cfg, dataset_stats, **forwarded
+            )
+        return original_make_pre_post(*args, **kwargs)
+
+    policy_factory.make_pre_post_processors = make_pre_post_processors_with_flower
+
+    # Also override the symbol inside the training script module
+    lerobot_train_module = importlib.import_module("lerobot.scripts.lerobot_train")
+    setattr(
+        lerobot_train_module,
+        "make_pre_post_processors",
+        make_pre_post_processors_with_flower,
+    )
 
     # Instantiate policy configuration
     policy_config = instantiate_policy_config(cfg.policy)
 
-    # Set up dataset configuration
-    dataset_cfg = DatasetConfig(repo_id=cfg.dataset.repo_id, root=cfg.dataset.root)
+    # Set up dataset configuration for local dataset
+    # For local datasets stored on disk, root should point to the dataset folder
+    dataset_path = Path(cfg.dataset.root)
+    log.info(f"Loading local dataset from: {dataset_path}")
+
+    # Check if dataset exists and has required metadata
+    meta_dir = dataset_path / "meta"
+    info_file = meta_dir / "info.json"
+
+    if not dataset_path.exists():
+        raise FileNotFoundError(
+            f"Dataset directory not found at: {dataset_path}\n"
+            f"Please check your dataset.root in the config."
+        )
+
+    if not info_file.exists():
+        raise FileNotFoundError(
+            f"Dataset metadata not found at: {info_file}\n"
+            f"Make sure your dataset is in LeRobot format with a meta/info.json file."
+        )
+
+    dataset_cfg = DatasetConfig(
+        repo_id=cfg.dataset.repo_id,  # Dataset name (for logging/identification)
+        root=str(dataset_path),  # Full path to dataset directory
+    )
 
     # Set up W&B configuration
     wandb_cfg = WandBConfig(
         enable=cfg.wandb.enable,
-        project=cfg.wandb.project.replace("${policy_name}", policy_name),
+        project=cfg.wandb.project.replace("${policy_name}", "flower"),
         entity=cfg.wandb.entity,
         mode=cfg.wandb.mode if cfg.wandb.enable else "disabled",
     )
@@ -101,14 +126,58 @@ def train(cfg: DictConfig) -> None:
         wandb=wandb_cfg,
     )
 
+    # Handle pretrained weights loading for fine-tuning
+    if hasattr(cfg, "pretrained_policy_path") and cfg.pretrained_policy_path:
+        log.info(f"Loading pretrained weights from: {cfg.pretrained_policy_path}")
+
+        # Create policy instance and load weights
+        policy = FlowerVLAPolicy(policy_config)
+
+        # Load checkpoint
+        checkpoint = torch.load(cfg.pretrained_policy_path, map_location="cpu")
+
+        # Handle different checkpoint formats
+        if isinstance(checkpoint, dict):
+            if "model_state_dict" in checkpoint:
+                state_dict = checkpoint["model_state_dict"]
+            elif "state_dict" in checkpoint:
+                state_dict = checkpoint["state_dict"]
+            elif "model" in checkpoint:
+                state_dict = checkpoint["model"]
+            else:
+                # Assume checkpoint is the state dict itself
+                state_dict = checkpoint
+        else:
+            state_dict = checkpoint
+
+        # Load weights (non-strict to allow for fine-tuning with different architectures)
+        missing_keys, unexpected_keys = policy.load_state_dict(state_dict, strict=False)
+
+        if missing_keys:
+            log.warning(f"Missing keys when loading checkpoint: {missing_keys}")
+        if unexpected_keys:
+            log.warning(f"Unexpected keys when loading checkpoint: {unexpected_keys}")
+
+        log.info("Pretrained weights loaded successfully!")
+
+        # Store the loaded policy in train_cfg
+        train_cfg.pretrained_policy = policy
+
+    if hasattr(cfg, "resume_from_checkpoint") and cfg.resume_from_checkpoint:
+        log.info(f"Resuming from checkpoint: {cfg.resume_from_checkpoint}")
+        train_cfg.resume = True
+        train_cfg.resume_path = cfg.resume_from_checkpoint
+
     # Initialize logging and start training
-    init_logging()
-    lerobot_train(train_cfg)
+    # Import training module late (after patching) and run
+    lerobot_train_module = importlib.import_module("lerobot.scripts.lerobot_train")
+    lerobot_train_module.init_logging()
+    lerobot_train_module.train(train_cfg)
 
     log.info("Training completed!")
 
 
-@hydra.main(config_path="../../configs", config_name="train_config", version_base="1.3")
+@hydra.main(config_path="../configs", config_name="train_config", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     """Main entry point for training with Hydra configuration."""
     # Set seed if specified
@@ -118,13 +187,8 @@ def main(cfg: DictConfig) -> None:
             torch.cuda.manual_seed_all(cfg.seed)
 
     # Override data_dir if provided as command line argument
-    # This allows: python train.py data_dir=/path/to/data
     if "data_dir" in cfg:
         cfg.dataset.root = cfg.data_dir
-
-    OmegaConf.set_struct(cfg, False)  # Allow adding new keys
-    cfg.policy_name = get_policy_name_from_config(cfg.policy)
-    OmegaConf.set_struct(cfg, True)  # Re-enable struct mode
 
     # Start training
     train(cfg)

@@ -1,23 +1,25 @@
 import logging
-from typing import Dict, Tuple, List, Any
+from typing import Any, Dict, List, Tuple
+
 import torch
 import torch.nn as nn
-from transformers import AutoProcessor, AutoModelForCausalLM
-from timm.layers.mlp import Mlp
 from lerobot.policies.pretrained import PreTrainedPolicy
-from .flower_config import FlowerVLAConfig
+from timm.layers.mlp import Mlp
+from torchdiffeq import odeint
+from transformers import AutoModelForCausalLM, AutoProcessor
+
 from .action_index import ActionIndex
+from .flower_config import FlowerVLAConfig
 from .transformers import (
-    TimestepEmbedder,
-    SharedAdaLNController,
-    RmsNorm,
-    FreqEmbedder,
     ActionSpaceEmbedderParameter,
-    ZeroEncoder,
     FlowBlock,
+    FreqEmbedder,
+    RmsNorm,
+    SharedAdaLNController,
+    TimestepEmbedder,
+    ZeroEncoder,
     stateless_norm,
 )
-from torchdiffeq import odeint
 
 logger = logging.getLogger(__name__)
 
@@ -57,18 +59,21 @@ class FlowerVLAPolicy(PreTrainedPolicy):
 
         self.model.reset()
 
-    def forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(
+        self, batch: Dict[str, torch.Tensor]
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """
-        Forward pass (training mode).
+        Forward pass (training mode) - returns (loss, output_dict) for LeRobot training loop.
 
         Args:
             batch: Dictionary with observation and action data
 
         Returns:
-            Dictionary with loss and other outputs
+            Tuple of (loss tensor, output dictionary with metrics)
         """
         # Delegate to model
-        return self.model.forward(batch)
+        result = self.model.forward(batch)
+        return result["loss"], result["loss_dict"]
 
     def encode_observations(
         self, batch: Dict[str, torch.Tensor]
@@ -540,7 +545,7 @@ class FlowerModel(nn.Module):
             Dictionary with loss and other outputs
         """
         obs_features = self.encode_observations(batch)
-        dataset_idx = batch.get("task", {}).get("dataset_index", None)
+        dataset_idx = batch.get("task.dataset_index", None)
         action_loss, losses_dict = self.rf_loss(
             obs_features, batch[self.target_modality], dataset_idx
         )
@@ -560,30 +565,70 @@ class FlowerModel(nn.Module):
         """
         device = self.device
         default_dtype = next(self.parameters()).dtype
-        image_tensor = batch[self.obs_modalities]["image_primary"]
-        B, T, C, H, W = image_tensor.shape
+        # Debug: print available keys
+        if not hasattr(self, "_keys_printed"):
+            logger.info(f"Available batch keys: {list(batch.keys())}")
+            self._keys_printed = True
+        image_tensor = batch["observation.images.right_cam"]
+
+        print(batch["task"])
+        # Handle both 4D [B, C, H, W] and 5D [B, T, C, H, W] image tensors
+        if len(image_tensor.shape) == 4:
+            # Shape is [B, C, H, W], add temporal dimension
+            B, C, H, W = image_tensor.shape
+            T = 1
+            image_tensor = image_tensor.unsqueeze(1)  # [B, 1, C, H, W]
+        else:
+            B, T, C, H, W = image_tensor.shape
+
         image_features = self.vlm._encode_image(
             image_tensor.view(-1, C, H, W).to(device).to(default_dtype)
         )
         image_features = image_features.view(B, T * image_features.shape[1], -1)
 
-        if self.use_second_view and self.second_view_key in batch[self.obs_modalities]:
-            image2_tensor = batch[self.obs_modalities][self.second_view_key]
+        if self.use_second_view and "observation.images.wrist_cam" in batch:
+            image2_tensor = batch["observation.images.wrist_cam"]
+
+            # Handle both 4D and 5D for second view as well
+            if len(image2_tensor.shape) == 4:
+                image2_tensor = image2_tensor.unsqueeze(1)
+
             image2_features = self.vlm._encode_image(
                 image2_tensor.view(-1, C, H, W).to(device).to(default_dtype)
             )
             image2_features = image2_features.view(B, T * image2_features.shape[1], -1)
             image_features = torch.cat([image_features, image2_features], dim=1)
 
-        text_embeds = (
-            self.vlm.get_input_embeddings()(
-                batch[self.goal_modalities][self.lang_modalities[0]]["input_ids"].to(
-                    device
-                )
+        # Handle language instruction - batch["task"] is a list of strings
+        # e.g., ['trickandtreat\n', 'trickandtreat\n', ...]
+        if "task" in batch:
+            task_text = batch["task"]
+            # task_text is already a list of strings
+            if not isinstance(task_text, list):
+                task_text = [task_text] * B
+
+            # Tokenize the text
+            tokenized = self.tokenizer(
+                task_text,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=128,
             )
-            .to(device)
-            .squeeze(1)
-        )
+            text_embeds = self.vlm.get_input_embeddings()(
+                tokenized["input_ids"].to(device)
+            ).to(device)
+            lang_attention_mask = tokenized["attention_mask"].to(device)
+        else:
+            # No language instruction - use empty/dummy text
+            dummy_text = [""] * B
+            tokenized = self.tokenizer(
+                dummy_text, return_tensors="pt", padding=True, max_length=128
+            )
+            text_embeds = self.vlm.get_input_embeddings()(
+                tokenized["input_ids"].to(device)
+            ).to(device)
+            lang_attention_mask = tokenized["attention_mask"].to(device)
 
         # get the flow prompt for florence
         task_prompt = self.prompt_embeds.expand(B, -1, -1)
@@ -597,14 +642,7 @@ class FlowerModel(nn.Module):
         )
 
         # get attention mask from txt
-        attention_mask = torch.ones(
-            merged_embeds.shape[:2], device=merged_embeds.device
-        )
-        lang_attention_mask = (
-            batch[self.goal_modalities][self.lang_modalities[0]]["attention_mask"]
-            .to(device)
-            .squeeze(1)
-        )
+        # lang_attention_mask was already created during tokenization above
         # define attention mask for image
         vis_attention_mask = torch.ones(
             image_features.shape[:2], device=image_features.device
@@ -642,16 +680,25 @@ class FlowerModel(nn.Module):
         return {
             "features": features,
             "frequency_embeds": self.frequency_embedder(
-                batch[self.goal_modalities]["frequency"].to(device).to(default_dtype)
+                batch.get(
+                    "task.frequency",
+                    torch.ones(B, 1, device=device, dtype=default_dtype),
+                )
+                .to(device)
+                .to(default_dtype)
             ),
             "action_space_embeds": self.action_space_embedder(
-                batch[self.goal_modalities]["action_space_index"].to(device)
+                batch.get(
+                    "task.action_space_index",
+                    torch.zeros(B, dtype=torch.long, device=device),
+                ).to(device)
             ),
-            "action_type": batch[self.goal_modalities]["action_space_index"],
-            "proprio": batch[self.obs_modalities]["proprio"]
-            .to(device)
-            .to(default_dtype)
-            if self.use_proprio and "proprio" in batch[self.obs_modalities]
+            "action_type": batch.get(
+                "task.action_space_index",
+                torch.zeros(B, dtype=torch.long, device=device),
+            ),
+            "proprio": batch["observation.state"].to(device).to(default_dtype)
+            if self.use_proprio and "observation.state" in batch
             else None,
             "attention_mask": attention_mask,
         }
