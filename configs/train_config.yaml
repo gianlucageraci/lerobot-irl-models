@@ -5,6 +5,7 @@ defaults:
 policy:
   _target_: src.policies.flower.modeling_flower.FlowerVLAPolicy
   repo_id: "flower-finetuned-trickandtreat"
+  push_to_hub: false  # Disable automatic push to Hugging Face Hub after training
 
   action_dim: 8
   chunk_size: 20
