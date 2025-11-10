@@ -18,7 +18,7 @@ dataset:
   root: "/hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot"
 
 training:
-  batch_size: 4
+  batch_size: 64
   steps: 30000
   save_freq: 20000
   log_freq: 100
