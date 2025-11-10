@@ -123,7 +123,6 @@ def train(cfg: DictConfig) -> None:
 
     wandb_cfg = WandBConfig(
         enable=cfg.wandb.enable,
-        project=cfg.wandb.project,
         entity=cfg.wandb.entity,
         mode=cfg.wandb.mode,
     )

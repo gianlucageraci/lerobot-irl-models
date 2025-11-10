@@ -24,6 +24,7 @@ training:
   log_freq: 100
 
 wandb:
+  enable: true
   project: "flower-finetuning"
   entity: j-p-suliga-kit
   mode: "online"  # Change to "offline" to log locally
