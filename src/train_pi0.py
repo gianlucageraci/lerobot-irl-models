@@ -48,16 +48,29 @@ def train(cfg: DictConfig) -> None:
     except Exception as e:
         log.warning(f"Could not patch video backend: {e}")
 
-    # Prepare policy configuration
-    policy_config_dict = OmegaConf.to_container(cfg.policy, resolve=True)
+    # Import Pi0 policy configuration from LeRobot
+    from lerobot.policies.pi0.configuration_pi0 import PI0Config
 
-    # Ensure policy type is set to pi0
-    policy_config_dict["type"] = "pi0"
+    # Create PI0Config instance with settings from hydra config
+    policy_cfg = PI0Config()
 
-    # Convert back to DictConfig
-    from omegaconf import OmegaConf
+    # Override with custom settings from your config if they exist
+    if hasattr(cfg.policy, "pretrained_path"):
+        policy_cfg.pretrained_path = cfg.policy.pretrained_path
+    if hasattr(cfg.policy, "compile_model"):
+        policy_cfg.compile_model = cfg.policy.compile_model
+    if hasattr(cfg.policy, "gradient_checkpointing"):
+        policy_cfg.gradient_checkpointing = cfg.policy.gradient_checkpointing
+    if hasattr(cfg.policy, "dtype"):
+        policy_cfg.dtype = cfg.policy.dtype
+    if hasattr(cfg.policy, "device"):
+        policy_cfg.device = cfg.policy.device
 
-    policy_cfg = OmegaConf.create(policy_config_dict)
+    # Handle hub configuration
+    if hasattr(cfg, "repo_id"):
+        policy_cfg.repo_id = cfg.repo_id
+    if hasattr(cfg, "push_to_hub"):
+        policy_cfg.push_to_hub = cfg.push_to_hub
 
     dataset_path = Path(cfg.dataset.root)
 

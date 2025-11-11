@@ -12,7 +12,8 @@ dataset:
   repo_id: "my_pi0_dataset"
   root: "/hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot"  # Override with --data_dir or dataset.root=path/to/data
   video_backend: "pyav"
-
+repo_id: "flower-finetuned-trickandtreat"
+push_to_hub: false
 # Training parameters
 training:
   batch_size: 64
