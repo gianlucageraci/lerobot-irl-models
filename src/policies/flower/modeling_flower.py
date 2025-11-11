@@ -1018,7 +1018,7 @@ class FlowerModel(nn.Module):
         """
         Samples actions using fixed-step Euler integration.
         """
-        steps = self.num_sampling_steps if inference else 5
+        steps = self.num_sampling_steps
         b = z.size(0)
         device = z.device
         action_type = cond["action_type"]
