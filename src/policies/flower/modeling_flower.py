@@ -172,7 +172,8 @@ class FlowerVLAPolicy(PreTrainedPolicy):
             action = self.model.pred_action_seq
         else:
             # Return single action at current step
-            action = self.model.pred_action_seq[:, self.model.rollout_step_counter, :]
+            action = self.model.pred_action_seq
+            # action = self.model.pred_action_seq[:, self.model.rollout_step_counter, :]
 
         # Update counter
         self.model.rollout_step_counter += 1
@@ -597,7 +598,7 @@ class FlowerModel(nn.Module):
         # Handle language instruction - batch["task"] is a list of strings
         # e.g., ['trickandtreat\n', 'trickandtreat\n', ...]
         if "task" in batch:
-            task_text = batch["task"]
+            task_text = "Grab the sweet and put it on the hand"  # batch["task"]
             # task_text is already a list of strings
             if not isinstance(task_text, list):
                 task_text = [task_text] * B

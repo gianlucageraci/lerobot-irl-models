@@ -2,6 +2,7 @@ import logging
 import time
 from pathlib import Path
 
+import cv2
 import einops
 import numpy as np
 import torch
@@ -108,7 +109,7 @@ class RealRobot(BaseSim):
                         "task": "Grab the sweet and put it on the hand",
                         "observation.state": robot_states,
                     }
-
+                    cv2.imwrite(f"debug_frame_{self.i}.jpg", obs["right_cam"]["rgb"])
                     pred_action = agent.select_action(obs_dict).cpu().numpy()
                     pred_joint_pos = pred_action[0, :7]
                     pred_gripper_command = pred_action[0, -1]

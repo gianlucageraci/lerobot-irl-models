@@ -35,7 +35,7 @@ class FlowerVLAConfig(PreTrainedConfig):
     use_proprio: bool = True
 
     # Image configuration
-    use_second_view: bool = False
+    use_second_view: bool = True
     second_view_key: str = "image_secondary"
 
     # DiT architecture
