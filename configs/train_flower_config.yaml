@@ -21,6 +21,7 @@ dataset:
   repo_id: "trickandtreat_lerobot"
   root: "/hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot" #"/home/multimodallearning/data_collected/flower-lerobot/trickandtreat/trickandtreat_lerobot" #"/home/multimodallearning/data_collected/flower-lerobot/trickandtreat/trickandtreat_lerobot" # "/hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot" #"/home/multimodallearning/data_collected/flower-lerobot/trickandtreat/trickandtreat_lerobot"
 
+dataset_stats: /hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot/meta/stats.json
 
 training:
   batch_size: 64
