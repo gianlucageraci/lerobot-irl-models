@@ -11,16 +11,8 @@ source ~/.bashrc
 conda activate lerobot-irl-models
 
 # HuggingFace fix
-export TOKENIZERS_PARALLELISM=false
-
-# NCCL optimizations for HoreKa
-export NCCL_DEBUG=INFO
-export NCCL_IB_DISABLE=0
-export NCCL_P2P_DISABLE=0
-export NCCL_SOCKET_IFNAME=ib0
-export OMP_NUM_THREADS=8
-
+#export TOKENIZERS_PARALLELISM=false
 export HYDRA_FULL_ERROR=1
 
 # Start training
-torchrun --standalone --nproc_per_node=4 src/train_flower.py
+torchrun --nproc_per_node=4 src/train_flower.py
