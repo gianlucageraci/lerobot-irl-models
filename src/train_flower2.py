@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 def train(cfg):
     dataset_cfg = DatasetConfig(
         repo_id="my_dataset",
-        root="/home/multimodallearning/data_collected/flower-lerobot/trickandtreat/trickandtreat_lerobot",
+        root="/hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot",
         video_backend="pyav",
     )
 
@@ -50,7 +50,8 @@ def train(cfg):
 
     policy = FlowerVLAPolicy(pretrained_config)
     checkpoint = torch.load(
-        "/home/multimodallearning/Downloads/360000_model_weight.pt", map_location="cpu"
+        "/hkfs/work/workspace/scratch/uhtfz-flower/360000_model_weight.pt",
+        map_location="cpu",
     )
 
     # Handle different checkpoint formats
