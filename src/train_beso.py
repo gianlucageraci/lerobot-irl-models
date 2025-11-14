@@ -53,7 +53,7 @@ def get_beso(typename: str, **kwargs):
 def get_wandb_config():
     wandb_config = WandBConfig(
         enable=False,
-        project="beso_lerobot",
+        project="flower_lerobot",
         mode="disabled",
     )
     return wandb_config

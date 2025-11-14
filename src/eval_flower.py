@@ -81,7 +81,23 @@ def main(cfg: DictConfig) -> None:
     if hasattr(cfg, "dataset_stats") and cfg.dataset_stats:
         # Load dataset stats if provided
         if isinstance(cfg.dataset_stats, str):
-            dataset_stats = torch.load(cfg.dataset_stats)
+            import json
+
+            log.info(f"Loading dataset stats from {cfg.dataset_stats}")
+            with open(cfg.dataset_stats, "r") as f:
+                stats_json = json.load(f)
+
+            # Convert JSON stats to tensor format expected by LeRobot
+            dataset_stats = {}
+            for key, value in stats_json.items():
+                if isinstance(value, dict) and "min" in value and "max" in value:
+                    dataset_stats[key] = {
+                        "min": torch.tensor(value["min"], dtype=torch.float32),
+                        "max": torch.tensor(value["max"], dtype=torch.float32),
+                        "mean": torch.tensor(value["mean"], dtype=torch.float32),
+                        "std": torch.tensor(value["std"], dtype=torch.float32),
+                    }
+            log.info(f"Loaded stats for keys: {list(dataset_stats.keys())}")
         else:
             dataset_stats = OmegaConf.to_container(cfg.dataset_stats, resolve=True)
 
