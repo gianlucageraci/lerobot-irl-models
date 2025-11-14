@@ -11,7 +11,8 @@
 source ~/.bashrc
 conda activate lerobot-irl-models
 
-
+export HYDRA_FULL_ERROR=1
+export TOKENIZERS_PARALLELISM=false
 torchrun --nproc_per_node=4 src/train_flower.py
 
 # Alternative Option, falls torchrun nicht passt:
