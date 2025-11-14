@@ -39,14 +39,15 @@ def train(cfg):
     # Load dataset stats for normalization
     dataset_stats = None
     stats_path = "/hkfs/work/workspace/scratch/uhtfz-flower/trickandtreat_lerobot/meta/stats.json"
-    
+
     log.info(f"Loading dataset stats from {stats_path}")
     import json
+
     with open(stats_path, "r") as f:
         stats_json = json.load(f)
-    
+
     log.info(f"Raw stats keys from JSON: {list(stats_json.keys())}")
-    
+
     # Convert to tensor format
     dataset_stats = {}
     for key, value in stats_json.items():
@@ -58,12 +59,14 @@ def train(cfg):
                     "min": torch.tensor(value["min"], dtype=torch.float32),
                     "max": torch.tensor(value["max"], dtype=torch.float32),
                 }
-                log.info(f"  ✓ Loaded stats for '{key}' - mean shape: {dataset_stats[key]['mean'].shape}")
+                log.info(
+                    f"  ✓ Loaded stats for '{key}' - mean shape: {dataset_stats[key]['mean'].shape}"
+                )
             except Exception as e:
                 log.warning(f"  ✗ Failed to load stats for '{key}': {e}")
         else:
             log.debug(f"  - Skipping '{key}' (no mean/std or not a dict)")
-    
+
     log.info(f"Final dataset_stats keys: {list(dataset_stats.keys())}")
 
     pretrained_config = FlowerVLAConfig(push_to_hub=False)
@@ -77,7 +80,7 @@ def train(cfg):
         steps=20000,
         save_freq=4000,
         seed=42,
-        log_freq=1,
+        log_freq=100,
         wandb=get_wandb_config(),
     )
 
@@ -123,7 +126,7 @@ def train(cfg):
 
     log.info("Pretrained weights loaded successfully!")
     train_cfg.pretrained_policy = policy
-    
+
     # Store dataset_stats for the factory function
     get_flower._dataset_stats = dataset_stats
 
@@ -134,8 +137,8 @@ def train(cfg):
 def get_flower(typename: str, **kwargs):
     """Factory function that returns FlowerVLAPolicy class with dataset_stats injected."""
     # Store dataset_stats globally so it can be used when policy is instantiated
-    if 'dataset_stats' not in kwargs and hasattr(get_flower, '_dataset_stats'):
-        kwargs['dataset_stats'] = get_flower._dataset_stats
+    if "dataset_stats" not in kwargs and hasattr(get_flower, "_dataset_stats"):
+        kwargs["dataset_stats"] = get_flower._dataset_stats
     return FlowerVLAPolicy
 
 
