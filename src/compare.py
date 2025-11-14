@@ -115,18 +115,51 @@ def main(cfg: DictConfig) -> None:
     wandb.init(mode="disabled")
 
     # ---------------------------------------------------------------------
-    # 3. Build the agent *exactly* as during training and load the checkpoint
+    # 3. Load dataset stats for normalization
     # ---------------------------------------------------------------------
-    config_dict = OmegaConf.to_container(cfg.policy, resolve=True)
-    # Remove _target_ as it's not a parameter for FlowerVLAConfig
-    config_dict.pop("_target_", None)
-    config = FlowerVLAConfig(**config_dict)
-    agent = FlowerVLAPolicy(config)
+    dataset_stats = None
+    stats_path = "/home/multimodallearning/data_collected/flower-lerobot/trickandtreat/trickandtreat_lerobot/meta/stats.json"
 
-    # You can point these two Hydra overrides at runtime:
-    #   python evaluate_model.py eval.ckpt_dir=/path/to/09-42-10 eval.ckpt_name=checkpoint_50000
-    ckpt_dir: Path = Path(OmegaConf.select(cfg, "eval.ckpt_dir", default=""))
-    ckpt_name: str = OmegaConf.select(cfg, "eval.ckpt_name", default="")
+    if os.path.exists(stats_path):
+        log.info(f"Loading dataset stats from {stats_path}")
+        import json
+
+        with open(stats_path, "r") as f:
+            stats_json = json.load(f)
+
+        log.info(f"Raw stats keys from JSON: {list(stats_json.keys())}")
+
+        # Convert to tensor format
+        dataset_stats = {}
+        for key, value in stats_json.items():
+            if isinstance(value, dict) and "mean" in value and "std" in value:
+                try:
+                    dataset_stats[key] = {
+                        "mean": torch.tensor(value["mean"], dtype=torch.float32),
+                        "std": torch.tensor(value["std"], dtype=torch.float32),
+                        "min": torch.tensor(value["min"], dtype=torch.float32),
+                        "max": torch.tensor(value["max"], dtype=torch.float32),
+                    }
+                    log.info(
+                        f"  ✓ Loaded stats for '{key}' - mean shape: {dataset_stats[key]['mean'].shape}"
+                    )
+                except Exception as e:
+                    log.warning(f"  ✗ Failed to load stats for '{key}': {e}")
+            else:
+                log.debug(f"  - Skipping '{key}' (no mean/std or not a dict)")
+
+        log.info(f"Final dataset_stats keys: {list(dataset_stats.keys())}")
+    else:
+        log.warning(f"Dataset stats file not found at {stats_path}")
+
+    # ---------------------------------------------------------------------
+    # 4. Build the agent *exactly* as during training and load the checkpoint
+    # ---------------------------------------------------------------------
+
+    config = FlowerVLAConfig()
+    # Store dataset_stats in config so it's available when Policy is instantiated
+    config._dataset_stats = dataset_stats
+    agent = FlowerVLAPolicy(config, dataset_stats=dataset_stats)
 
     from safetensors.torch import load_file
 
@@ -178,7 +211,7 @@ def main(cfg: DictConfig) -> None:
     torch.cuda.empty_cache()
 
     # ---------------------------------------------------------------------
-    # 4. Find all data directories and setup paths
+    # 5. Find all data directories and setup paths
     # ---------------------------------------------------------------------
     base_data_dir = Path("/home/multimodallearning/data_collected/flower/trickandtreat")
     data_dirs = sorted([d for d in base_data_dir.iterdir() if d.is_dir()])
@@ -200,7 +233,7 @@ def main(cfg: DictConfig) -> None:
     device = torch.device(cfg.device)
 
     # ---------------------------------------------------------------------
-    # 5. Process each episode
+    # 6. Process each episode
     # ---------------------------------------------------------------------
     for episode_idx, data_root in enumerate(data_dirs):
         log.info(f"\n{'='*80}")
@@ -335,7 +368,7 @@ def main(cfg: DictConfig) -> None:
             continue
 
     # ---------------------------------------------------------------------
-    # 6. Compute aggregate statistics across all episodes
+    # 7. Compute aggregate statistics across all episodes
     # ---------------------------------------------------------------------
     if not all_episode_metrics:
         log.error("No episodes were successfully processed!")
@@ -366,7 +399,7 @@ def main(cfg: DictConfig) -> None:
         log.info(f"  Dimension {dim}: {np.mean(dim_mses):.6f} ± {np.std(dim_mses):.6f}")
 
     # ---------------------------------------------------------------------
-    # 7. Save aggregate results
+    # 8. Save aggregate results
     # ---------------------------------------------------------------------
     results_path = Path("plots") / "all_predictions.pt"
     torch.save(
@@ -388,7 +421,7 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Saved aggregate results to {results_path}")
 
     # ---------------------------------------------------------------------
-    # 8. Create aggregate visualizations
+    # 9. Create aggregate visualizations
     # ---------------------------------------------------------------------
 
     # Plot 1: MSE distribution across episodes

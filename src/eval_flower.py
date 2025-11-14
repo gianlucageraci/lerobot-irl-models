@@ -49,12 +49,11 @@ def instantiate_policy(policy_cfg: DictConfig, dataset_stats: dict = None):
     policy_name = get_policy_name_from_config(policy_cfg)
     log.info(f"Instantiating {policy_name} policy...")
 
-    # Convert OmegaConf to dict
-    config_dict = OmegaConf.to_container(policy_cfg, resolve=True)
-    target = config_dict.pop("_target_")
-
-    config = FlowerVLAConfig(**config_dict)
-    agent = FlowerVLAPolicy(config)
+    config = FlowerVLAConfig()
+    # Store dataset_stats in config so it's available when Policy is instantiated
+    if dataset_stats is not None:
+        config._dataset_stats = dataset_stats
+    agent = FlowerVLAPolicy(config, dataset_stats=dataset_stats)
 
     return agent, policy_name
 
@@ -78,28 +77,41 @@ def main(cfg: DictConfig) -> None:
 
     # Instantiate agent from config
     dataset_stats = None
-    if hasattr(cfg, "dataset_stats") and cfg.dataset_stats:
-        # Load dataset stats if provided
-        if isinstance(cfg.dataset_stats, str):
-            import json
 
-            log.info(f"Loading dataset stats from {cfg.dataset_stats}")
-            with open(cfg.dataset_stats, "r") as f:
-                stats_json = json.load(f)
+    default_stats_path = "/home/multimodallearning/data_collected/flower-lerobot/trickandtreat/trickandtreat_lerobot/meta/stats.json"
+    if os.path.exists(default_stats_path):
+        log.info(f"Loading dataset stats from default path: {default_stats_path}")
+        import json
 
-            # Convert JSON stats to tensor format expected by LeRobot
-            dataset_stats = {}
-            for key, value in stats_json.items():
-                if isinstance(value, dict) and "min" in value and "max" in value:
+        with open(default_stats_path, "r") as f:
+            stats_json = json.load(f)
+
+        log.info(f"Raw stats keys from JSON: {list(stats_json.keys())}")
+
+        # Convert to tensor format
+        dataset_stats = {}
+        for key, value in stats_json.items():
+            if isinstance(value, dict) and "mean" in value and "std" in value:
+                try:
                     dataset_stats[key] = {
-                        "min": torch.tensor(value["min"], dtype=torch.float32),
-                        "max": torch.tensor(value["max"], dtype=torch.float32),
                         "mean": torch.tensor(value["mean"], dtype=torch.float32),
                         "std": torch.tensor(value["std"], dtype=torch.float32),
+                        "min": torch.tensor(value["min"], dtype=torch.float32),
+                        "max": torch.tensor(value["max"], dtype=torch.float32),
                     }
-            log.info(f"Loaded stats for keys: {list(dataset_stats.keys())}")
-        else:
-            dataset_stats = OmegaConf.to_container(cfg.dataset_stats, resolve=True)
+                    log.info(
+                        f"  ✓ Loaded stats for '{key}' - mean shape: {dataset_stats[key]['mean'].shape}"
+                    )
+                except Exception as e:
+                    log.warning(f"  ✗ Failed to load stats for '{key}': {e}")
+            else:
+                log.debug(f"  - Skipping '{key}' (no mean/std or not a dict)")
+
+        log.info(f"Final dataset_stats keys: {list(dataset_stats.keys())}")
+    else:
+        log.warning(
+            f"No dataset stats provided and default path not found: {default_stats_path}"
+        )
 
     agent, policy_name = instantiate_policy(cfg.policy, dataset_stats=dataset_stats)
     log.info(f"Successfully instantiated {policy_name} agent")
