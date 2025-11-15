@@ -35,10 +35,10 @@ def train(cfg):
         policy=pretrained_config,
         dataset=dataset_cfg,
         batch_size=64,
-        steps=20000,
+        steps=40000,
         save_freq=4000,
         seed=42,
-        log_freq=1,
+        log_freq=100,
         wandb=get_wandb_config(),
     )
 
