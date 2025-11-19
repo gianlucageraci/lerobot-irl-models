@@ -25,6 +25,8 @@ For evaluation:
 
 
 
+DO NOT USE REQUIREMENTS.TXT FOR INSTALLATION!
+THIS IS OLD, DO NOT USE!
 
 Evaluation on real robot:
 
