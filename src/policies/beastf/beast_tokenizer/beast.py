@@ -1,7 +1,7 @@
-from bsplines.bspline_factory import SplineFactory
+from .bsplines.bspline_factory import SplineFactory
 import torch
 from addict import Dict
-from utils import continuous_to_discrete, discrete_to_continuous, normalize_tensor, denormalize_tensor, tensor_linspace
+from .utils import continuous_to_discrete, discrete_to_continuous, normalize_tensor, denormalize_tensor, tensor_linspace
 import numpy as np
 import matplotlib.pyplot as plt
 import einops

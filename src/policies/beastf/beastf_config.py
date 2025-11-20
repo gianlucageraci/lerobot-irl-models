@@ -8,7 +8,7 @@ from lerobot.optim.schedulers import CosineDecayWithWarmupSchedulerConfig
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 
 
-@PreTrainedConfig.register_subclass("flower")
+@PreTrainedConfig.register_subclass("beast_vla")
 class BeastVLAConfig(SmolVLAConfig):
     def __init__(
         self,
@@ -58,31 +58,16 @@ class BeastVLAConfig(SmolVLAConfig):
         self.sampling_type: str = "uniform"
         self.lowdim_obs_dim: int = 16
         self.use_proprio: bool = True
-
         # Image configuration
         self.use_second_view: bool = True
         self.second_view_key: str = "image_secondary"
-
-        # DiT architecture
-        self.dit_dim: int = 1024
-        self.n_heads: int = 16
-        self.n_layers: int = 12
-        self.attn_pdrop: float = 0.1
-        self.resid_pdrop: float = 0.1
-        self.mlp_pdrop: float = 0.1
-        # Attention configuration
-        self.use_cross_attn: bool = True
-        self.use_causal_attention: bool = True
-        self.use_adaln_cond: bool = False
-        self.action_type_adaln: bool = True
-        self.use_readout_token: bool = False
-
-        # Positional encoding
-        self.use_rope: bool = True
-        self.use_nope: bool = False
-        self.query_seq_len: int = 100
-        self.rope_theta: float = 1000.0
-
+        # Beast Tokenizer configuration
+        self.num_dof: int = 8
+        # B-spline parameters
+        self.num_basis: int = 5
+        self.degree_p: int = 4
+        self.action_bins: int = 256
+        self.update_w_bound: bool = False
         # Action output configuration
         self.return_act_chunk: bool = False
         # Additional features
@@ -93,9 +78,9 @@ class BeastVLAConfig(SmolVLAConfig):
     def get_optimizer_preset(self) -> AdamWConfig:
         return AdamWConfig(
             lr=2e-5,
-            betas=(0.9, 0.95),
+            betas=(0.9, 0.999),
             eps=1e-8,
-            weight_decay=0.01,
+            weight_decay=1e-4,
         )
 
     def get_scheduler_preset(self):

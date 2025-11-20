@@ -12,8 +12,8 @@ from lerobot.policies import factory
 from lerobot.scripts.lerobot_train import train as lerobot_train
 from lerobot.utils.utils import init_logging
 
-from policies.beast_f.beast_config import BeastVLAConfig
-from policies.beast_f.modeling_beast import FlowerVLAPolicy
+from policies.beastf.beastf_config import BeastVLAConfig
+from policies.beastf.modeling_beastf import BeastVLAPolicy
 
 os.environ["LEROBOT_VIDEO_BACKEND"] = "pyav"
 
@@ -31,7 +31,7 @@ def train(cfg):
         root=cfg.dataset_path,
         video_backend="pyav",
     )
-    pretrained_config = FlowerVLAConfig(
+    pretrained_config = BeastVLAConfig(
         compile_model=cfg.train.compile_model,
         dtype=cfg.train.dtype,
         device=cfg.train.device,

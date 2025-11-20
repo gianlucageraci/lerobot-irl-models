@@ -89,38 +89,6 @@ class FlowerVLAConfig(SmolVLAConfig):
         self.use_action_scale: bool = False
         self.use_early_cross_fusion: bool = True
 
-    # def __post_init__(self):
-    #     """Validate configuration after initialization"""
-    #     valid_sampling_types = ["uniform", "ln", "pi_zero", "loglogistic", "stratified"]
-    #     if self.sampling_type not in valid_sampling_types:
-    #         raise ValueError(
-    #             f"Invalid sampling_type: {self.sampling_type}. "
-    #             f"Must be one of {valid_sampling_types}"
-    #         )
-
-    #     # Validate prompt style
-    #     valid_prompt_styles = ["default", "feature_focused", "state_oriented"]
-    #     if self.vlm_prompt_style not in valid_prompt_styles:
-    #         raise ValueError(
-    #             f"Invalid vlm_prompt_style: {self.vlm_prompt_style}. "
-    #             f"Must be one of {valid_prompt_styles}"
-    #         )
-
-    #     # Validate dimensions
-    #     if self.dit_dim % self.n_heads != 0:
-    #         raise ValueError(
-    #             f"dit_dim ({self.dit_dim}) must be divisible by "
-    #             f"n_heads ({self.n_heads})"
-    #         )
-
-    #     # Validate action window and multistep
-    #     if self.act_window_size <= 0:
-    #         raise ValueError(
-    #             f"act_window_size must be positive, got {self.act_window_size}"
-    #         )
-
-    #     if self.multistep <= 0:
-    #         raise ValueError(f"multistep must be positive, got {self.multistep}")
 
     def get_optimizer_preset(self) -> AdamWConfig:
         return AdamWConfig(
