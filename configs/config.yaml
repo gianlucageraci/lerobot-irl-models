@@ -3,7 +3,7 @@ repo_id: "your_repo_id"
 dataset_path: "/hkfs/work/workspace/scratch/uhtfz-flower/vla_data_lerobot"
 
 checkpoint_path: /hkfs/work/workspace/scratch/uhtfz-flower/360000_model_weight.pt
-stats_path: /path/to/your/dataset/stats.json # for evaluation
+
 train:
   batch_size: 1
   steps: 60000
