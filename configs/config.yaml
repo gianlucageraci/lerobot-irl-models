@@ -1,9 +1,7 @@
-
 repo_id: "vla_data_lerobot"
-dataset_path: "/home/hongyi/DATA/bootcamp_data/vla_data_lerobot/"
+dataset_path: "/home/hongyi/DATA/bootcamp_data/vla_data_lerobot"
+checkpoint_path: /hkfs/work/workspace/scratch/uhtfz-flower/360000_model_weight.pt
 
-checkpoint_path: /home/multimodallearning/model_wei/020000/pretrained_model/model.safetensors
-stats_path: /path/to/your/dataset/stats.json # for evaluation
 train:
   batch_size: 2
   steps: 40000
@@ -12,12 +10,13 @@ train:
   device: cuda
   num_workers: 1
   log_freq: 100
-  dtype: bfloat16
-  output_dir: "./output/model"
+  output_dir: "./output/beast/"
   job_name: "model_training"
+  push_to_hub: false
+  #Only pi0/pi05
   gradient_checkpointing: true
   compile_model: false
-  push_to_hub: false
+
 wandb:
   enable: true
   project: "lerobot-beast-training"

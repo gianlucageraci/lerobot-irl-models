@@ -47,17 +47,14 @@ def train(cfg):
     print(f"Action shape: {action_shape}")
 
     policy_cfg = GrootConfig(
-        pretrained_path="lerobot/groot",  
         repo_id=cfg.repo_id,
-        compile_model=cfg.train.compile_model,
-        dtype=cfg.train.dtype,
         device=cfg.train.device,
         push_to_hub=cfg.train.push_to_hub,
-        gradient_checkpointing=cfg.train.gradient_checkpointing,
         input_features={
             "observation.images.right_cam": PolicyFeature(FeatureType.VISUAL, img_shape),
             "observation.images.wrist_cam": PolicyFeature(FeatureType.VISUAL, img_shape),
             "observation.state": PolicyFeature(FeatureType.STATE, state_shape),
+            "task": PolicyFeature(FeatureType.TEXT, (1,)),
         },
         output_features={
             "action": PolicyFeature(FeatureType.ACTION, action_shape),
@@ -67,7 +64,7 @@ def train(cfg):
     train_cfg = TrainPipelineConfig(
         policy=policy_cfg,
         dataset=dataset_cfg,
-        output_dir=cfg.train.output_dir,
+        output_dir=Path(cfg.train.output_dir),
         job_name=cfg.train.job_name,
         batch_size=cfg.train.batch_size,
         num_workers=cfg.train.num_workers,

@@ -106,7 +106,7 @@ class RealRobot(BaseSim):
                         # "front_cam_image": front_cam,
                         "observation.images.right_cam": right_cam,
                         "observation.images.wrist_cam": wrist_cam,
-                        "task": "Grab the sweet and put it on the hand",
+                        "task": "pick_up_blue_cube",
                         "observation.state": robot_states,
                     }
                     cv2.imwrite(f"debug_frame_{self.i}.jpg", obs["right_cam"]["rgb"])

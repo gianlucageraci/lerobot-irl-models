@@ -32,11 +32,8 @@ def train(cfg):
         video_backend="pyav",
     )
     pretrained_config = FlowerVLAConfig(
-        compile_model=cfg.train.compile_model,
-        dtype=cfg.train.dtype,
         device=cfg.train.device,
         push_to_hub=cfg.train.push_to_hub,
-        gradient_checkpointing=cfg.train.gradient_checkpointing
         )
     
     train_cfg = TrainPipelineConfig(
@@ -44,17 +41,17 @@ def train(cfg):
         dataset=dataset_cfg,
         batch_size=cfg.train.batch_size,
         steps=cfg.train.steps,
-        output_dir=cfg.train.output_dir,
+        output_dir=Path(cfg.train.output_dir),
         job_name=cfg.train.job_name,
         save_freq=cfg.train.save_freq,
         seed=cfg.train.seed,
         log_freq=cfg.train.log_freq,
         num_workers=cfg.train.num_workers,
         wandb=WandBConfig(
-        enable=cfg.wandb.enable,
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        mode=cfg.wandb.mode,
+            enable=cfg.wandb.enable,
+            project=cfg.wandb.project,
+            entity=cfg.wandb.entity,
+            mode=cfg.wandb.mode,
         ),
     )
 
