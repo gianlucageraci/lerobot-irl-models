@@ -6,6 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import einops
 
+from functools import wraps
+
+def autocast_float32(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with torch.cuda.amp.autocast(dtype=torch.float32):
+            return fn(*args, **kwargs)
+    return wrapped
 
 class BeastTokenizer(torch.nn.Module):
     """
@@ -77,7 +85,8 @@ class BeastTokenizer(torch.nn.Module):
     def _get_repeated_times(self, batch_size):
         """Get time tensor repeated for batch processing."""
         return einops.repeat(self.times, 't -> b t', b=batch_size)
-    
+
+    @autocast_float32 
     def _learn_trajectory_params(self, times, trajs):
         """Learn B-spline parameters from trajectories."""
         # Learn joint parameters
@@ -90,7 +99,8 @@ class BeastTokenizer(torch.nn.Module):
             joint_params['params'] = torch.cat([joint_params['params'], gripper_params['params']], dim=-1)
         
         return joint_params
-    
+
+    @autocast_float32 
     def _reconstruct_trajectory(self, params, times):
         """Reconstruct trajectory from B-spline parameters."""
         # Reconstruct joint trajectory
@@ -119,7 +129,8 @@ class BeastTokenizer(torch.nn.Module):
         reshaped_params[:, 0, :self.joint_dof] = init_pos[:, :self.joint_dof]
         
         return einops.rearrange(reshaped_params, "b t d -> b (d t)")
-    
+
+    @autocast_float32 
     def compute_weights(self, demos):
         """Compute B-spline weights from demonstration trajectories."""
         times = self._get_repeated_times(demos.shape[0])
@@ -147,6 +158,7 @@ class BeastTokenizer(torch.nn.Module):
         self.times = times
     
     @torch.no_grad() 
+    @autocast_float32
     def encode_discrete(self, trajs, update_bounds=False, init_p=None):
         """Encode trajectories to discrete tokens."""
         times = self._get_repeated_times(trajs.shape[0])
@@ -165,6 +177,7 @@ class BeastTokenizer(torch.nn.Module):
         return tokens
     
     @torch.no_grad()
+    @autocast_float32
     def decode_discrete(self, tokens, times=None, init_pos=None):
         """Decode discrete tokens to trajectories."""
         # Reshape tokens and convert to continuous parameters
@@ -180,6 +193,7 @@ class BeastTokenizer(torch.nn.Module):
         return self._reconstruct_trajectory(params, times)
     
     @torch.no_grad() 
+    @autocast_float32
     def encode_continuous(self, trajs, update_bounds=False):
         """Encode trajectories to continuous tokens (normalized parameters)."""
         times = self._get_repeated_times(trajs.shape[0])
@@ -194,6 +208,7 @@ class BeastTokenizer(torch.nn.Module):
         return tokens
     
     @torch.no_grad()
+    @autocast_float32
     def decode_continuous(self, params, times=None, init_pos=None):
         """Decode continuous tokens (normalized parameters) to trajectories."""
         # Denormalize parameters
@@ -206,7 +221,8 @@ class BeastTokenizer(torch.nn.Module):
         params = self._apply_initial_position_constraint(params, init_pos)
         
         return self._reconstruct_trajectory(params, times)
-    
+
+    @autocast_float32 
     def compute_reconstruction_error(self, raw_traj):
         """Compute reconstruction error for trajectory."""
         if len(raw_traj.shape) == 2:
