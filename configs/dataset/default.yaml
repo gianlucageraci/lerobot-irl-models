@@ -1,0 +1,4 @@
+# conf/dataset/default.yaml
+repo_id: "multi_task_11"
+dataset_path: "/hkfs/work/workspace/scratch/usmrd-MemVLA/datasets/lerobot/multi_task_11"
+checkpoint_path: "/home/hk-project-p0024638/usmrd/model_weights/flower_pret/360000_model_weights.pt"

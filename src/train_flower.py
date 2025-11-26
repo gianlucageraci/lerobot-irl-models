@@ -12,7 +12,6 @@ from lerobot.policies import factory
 from lerobot.scripts.lerobot_train import train as lerobot_train
 from lerobot.utils.utils import init_logging
 
-from policies.flower.flower_config import FlowerVLAConfig
 from policies.flower.modeling_flower import FlowerVLAPolicy
 
 os.environ["LEROBOT_VIDEO_BACKEND"] = "pyav"
@@ -31,11 +30,8 @@ def train(cfg):
         root=cfg.dataset_path,
         video_backend="pyav",
     )
-    pretrained_config = FlowerVLAConfig(
-        device=cfg.train.device,
-        push_to_hub=cfg.train.push_to_hub,
-        )
-    
+    pretrained_config = hydra.utils.instantiate(cfg.model)
+        
     train_cfg = TrainPipelineConfig(
         policy=pretrained_config,
         dataset=dataset_cfg,

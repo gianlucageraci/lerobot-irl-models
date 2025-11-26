@@ -1,0 +1,19 @@
+# conf/train/train.yaml
+batch_size: 2
+steps: 40000
+save_freq: 100
+seed: 42
+device: cuda
+num_workers: 1
+log_freq: 100
+output_dir: "./output/pi0.5/"
+job_name: "model_training"
+push_to_hub: false
+gradient_checkpointing: true
+compile_model: false
+
+
+# Optional: hydra-run specific settings (uncomment to enable overrides)
+# hydra:
+# run:
+# dir: "${output_dir}/hydra_runs"

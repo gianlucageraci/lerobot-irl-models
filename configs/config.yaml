@@ -1,24 +1,15 @@
-repo_id: "your data id"
-dataset_path: "your dataset path"
-checkpoint_path: /hkfs/work/workspace/scratch/uhtfz-flower/360000_model_weight.pt
+# conf/config.yaml
+defaults:
+- dataset: default
+- train: train
+- model: flower
+- optimizer: adamw
+- scheduler: cosine_warmup
+- wandb: wandb
+- _self_
 
-train:
-  batch_size: 2
-  steps: 40000
-  save_freq: 100
-  seed: 42
-  device: cuda
-  num_workers: 1
-  log_freq: 100
-  output_dir: "./output/pi0.5/"
-  job_name: "model_training"
-  push_to_hub: false
-  #Only pi0/pi05
-  gradient_checkpointing: true
-  compile_model: false
 
-wandb:
-  enable: false
-  project: "lerobot-training"
-  entity: "your-wandb-entity"
-  mode: "disabled"  # "online", "offline", "disabled"
+# Top-level metadata + short-cuts
+repo_id: ${dataset.repo_id}
+dataset_path: ${dataset.dataset_path}
+checkpoint_path: ${dataset.checkpoint_path}
