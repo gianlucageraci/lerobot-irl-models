@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 
 @hydra.main(
-    config_path="../configs", config_name="config", version_base="1.3"
+    config_path="../configs/flower", config_name="flower_config", version_base="1.3"
 )
 def train(cfg):
     dataset_cfg = DatasetConfig(

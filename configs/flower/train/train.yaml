@@ -1,12 +1,12 @@
 # conf/train/train.yaml
 batch_size: 2
 steps: 40000
-save_freq: 100
+save_freq: 5000
 seed: 42
 device: cuda
-num_workers: 1
+num_workers: 4
 log_freq: 100
-output_dir: "./output/pi0.5/"
+output_dir: "./output/flower/"
 job_name: "model_training"
 push_to_hub: false
 gradient_checkpointing: true
