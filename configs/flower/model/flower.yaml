@@ -1,7 +1,7 @@
-# conf/model/flower.yaml
+# # conf/model/flower.yaml
 
 _target_: policies.flower.flower_config.FlowerVLAConfig
-# Modalities
+# Modalities (not used currently)
 obs_modalities: "observation"
 goal_modalities: "task"
 target_modality: "action"
@@ -10,33 +10,40 @@ lang_modalities:
 img_modalities:
 - "image_primary"
 
-# Input / Output features
-input_features:
-  observation.images.right_cam:
-    type: VISUAL
-    shape: [3, 256, 256]
-  observation.images.left_cam:
-    type: VISUAL
-    shape: [3, 256, 256]
-  observation.images.wrist_cam:
-    type: VISUAL
-    shape: [3, 256, 256]
-  observation.state:
-    type: STATE
-    shape: [7]
-  task:
-    type: LANGUAGE
-    shape: [1]
+# Input / Output features are handled directly in flower_config.py for now as
+# passing the correct datatypes is not straightforward.
+# input_features:
+#   observation.images.right_cam:
+#     _target_: lerobot.configs.types.PolicyFeature
+#     type: ${python:lerobot.configs.types.FeatureType.VISUAL}
+#     shape: [3, 224, 224]
+#   observation.images.left_cam:
+#     _target_: lerobot.configs.types.PolicyFeature
+#     type: ${python:lerobot.configs.types.FeatureType.VISUAL}
+#     shape: [3, 224, 224]
+#   observation.images.wrist_cam:
+#     _target_: lerobot.configs.types.PolicyFeature
+#     type: ${python:lerobot.configs.types.FeatureType.VISUAL}
+#     shape: [3, 224, 224]
+#   observation.state:
+#     _target_: lerobot.configs.types.PolicyFeature
+#     type: ${python:lerobot.configs.types.FeatureType.STATE}
+#     shape: [7]
+#   task:
+#     _target_: lerobot.configs.types.PolicyFeature
+#     type: ${python:lerobot.configs.types.FeatureType.LANGUAGE}
+#     shape: [1]
 
-output_features:
-  action:
-    type: ACTION
-    shape: [8]
+# output_features:
+#   action:
+#     _target_: lerobot.configs.types.PolicyFeature
+#     type: ${python:lerobot.configs.types.FeatureType.ACTION}
+#     shape: [8]
 
 # Normalization mapping (FeatureType -> NormalizationMode)
 normalization_mapping:
-  STATE: MEAN_STD
-  ACTION: MEAN_STD
+  STATE: ${python:lerobot.configs.types.NormalizationMode.MEAN_STD}
+  ACTION: ${python:lerobot.configs.types.NormalizationMode.MEAN_STD}
 
 
 # VLM configuration
@@ -63,7 +70,7 @@ use_proprio: true
 
 # Image configuration
 use_second_view: true
-second_view_key: "test" #"image_secondary"
+second_view_key: "observation.images.wrist_cam"
 
 
 # DiT architecture

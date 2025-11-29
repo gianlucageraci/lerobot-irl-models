@@ -1,15 +1,24 @@
-# conf/config.yaml
-defaults:
-- dataset: default
-- train: train
-- model: flower
-- optimizer: adamw
-- scheduler: cosine_warmup
-- wandb: wandb
-- _self_
+repo_id: pepper_only
+dataset_path: /hkfs/work/workspace/scratch/usmrd-MemVLA/datasets/lerobot/pepper_only
+checkpoint_path: /home/hk-project-p0024638/usmrd/model_weights/flower_pret/360000_model_weights.pt
 
+train:
+  batch_size: 64 #64
+  steps: 40000 #40000
+  save_freq: 5000
+  seed: 42
+  device: cuda
+  num_workers: 4
+  log_freq: 100
+  output_dir: "./output/flower/"
+  job_name: "model_training"
+  push_to_hub: false
+  #Only pi0/pi05
+  gradient_checkpointing: true
+  compile_model: false
 
-# Top-level metadata + short-cuts
-repo_id: ${dataset.repo_id}
-dataset_path: ${dataset.dataset_path}
-checkpoint_path: ${dataset.checkpoint_path}
+wandb:
+  enable: false
+  project: "lerobot-training"
+  entity: "your-wandb-entity"
+  mode: "disabled"  # "online", "offline", "disabled"

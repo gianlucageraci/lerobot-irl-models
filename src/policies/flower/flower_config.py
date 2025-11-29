@@ -28,9 +28,9 @@ class FlowerVLAConfig(SmolVLAConfig):
 
     # Features
     input_features: Dict[str, PolicyFeature] = field(default_factory=lambda: {
-        "observation.images.right_cam": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 256, 256)),
-        "observation.images.wrist_cam": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 256, 256)),
-        "observation.images.left_cam": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 256, 256)),
+        "observation.images.right_cam": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 224, 224)),
+        "observation.images.wrist_cam": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 224, 224)),
+        "observation.images.left_cam": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 224, 224)),
         "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(7,)),
         "task": PolicyFeature(type=FeatureType.LANGUAGE, shape=(1,)),
     })
@@ -94,6 +94,7 @@ class FlowerVLAConfig(SmolVLAConfig):
     # Additional features
     use_action_scale: bool = False
     use_early_cross_fusion: bool = True
+    push_to_hub: bool = False
 
 #     def get_optimizer_preset(self) -> AdamWConfig:
 #         return AdamWConfig(
